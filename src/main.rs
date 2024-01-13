@@ -81,23 +81,48 @@ fn main() -> Result<(), Box<dyn error::Error>> {
 
         let mut outp = fs::File::create("foo.ima")?;
         let mut i = 0;
+        let mut byte_incr;
 
         loop {
-
-            ReadFile(handle,
+            let res = ReadFile(handle,
                 Some(&mut *buf),
                 Some(&mut byte_ret),
-                None)?;
+                None);
 
-            if byte_ret == 0 {
-                break;
+            if res.is_err() {
+                println!("Read error {}", res.unwrap_err());
+                let next_possible_sector = if byte_ret == 0 {
+                    i + (8192 as u32/512)
+                } else {
+                    i + (byte_ret as u32/512)
+                };
+
+                println!("Moving to {}", next_possible_sector * 512);
+                SetFilePointer(handle, (next_possible_sector * 512) as i32, None, FILE_BEGIN);
+                buf[byte_ret as usize..].fill(0);
+
+                if byte_ret == 0 {
+                    if next_possible_sector as u64 > (dg.Cylinders as u64 * dg.SectorsPerTrack as u64 * dg.TracksPerCylinder as u64) {
+                        break;
+                    }
+                    byte_incr = 8192;
+                } else {
+                    byte_incr = next_possible_sector * 512;
+                }
+            } else {
+                byte_incr = byte_ret;
+                if byte_ret == 0 {
+                    break;
+                }
             }
 
             outp.write(&*buf)?;
             //println!("Sector {} Data {:X?}", i, buf);
-            println!("Sector {}-{}, {}", i, i + (byte_ret/512) - 1, byte_ret);
+            if byte_ret > 0 {
+                println!("Sector {}-{}, {}", i, i + (byte_ret/512) - 1, byte_ret);
+            }
 
-            i += byte_ret/512;
+            i += byte_incr/512;
         };
 
         DeviceIoControl(
